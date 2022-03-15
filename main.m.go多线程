@@ -1,0 +1,99 @@
+package main
+
+import (
+	"fmt"
+	"sync"
+	"time"
+
+	"github.com/lionsoul2014/ip2region/binding/golang/ip2region"
+)
+
+type IpInfo struct {
+	Ip       string `json:"ip"`
+	Country  string `json:"country"`  // 国家
+	Province string `json:"province"` // 省
+	City     string `json:"city"`     // 市
+	County   string `json:"county"`   // 县、区
+	Region   string `json:"region"`   // 区域位置
+	ISP      string `json:"isp"`      // 互联网服务提供商
+}
+
+func QuerIP_go(ip string, response chan IpInfo, limiter chan bool, wg *sync.WaitGroup, region *ip2region.Ip2Region) {
+	// fmt.Println()
+	fmt.Println("开始携程:\t", ip, time.Now())
+	// 函数执行完毕时 计数器-1
+	defer wg.Done()
+	// 将拿到的结果, 发送到参数中传递过来的channel中
+
+	info, _ := region.MemorySearch(ip)
+	rinfo := &IpInfo{
+		Ip:       ip,
+		ISP:      info.ISP,
+		Country:  info.Country,
+		Province: info.Province,
+		City:     info.City,
+		County:   "",
+		Region:   info.Region,
+	}
+	response <- *rinfo
+	// 释放一个坑位
+	<-limiter
+}
+
+// 将所有的返回结果, 以 []string 的形式返回
+func QuerIP(urls []string) []IpInfo {
+	var result []IpInfo
+
+	wg := &sync.WaitGroup{}
+	// 控制并发数为10
+	limiter := make(chan bool, 5)
+	defer close(limiter)
+
+	// 函数内的局部变量channel, 专门用来接收函数内所有goroutine的结果
+	responseChannel := make(chan IpInfo, 20)
+	// 为读取结果控制器创建新的WaitGroup, 需要保证控制器内的所有值都已经正确处理完毕, 才能结束
+	wgResponse := &sync.WaitGroup{}
+	// 启动读取结果的控制器
+	// wgResponse计数器+1
+	wgResponse.Add(1)
+	go func() {
+		// 读取结果
+		for response := range responseChannel {
+			// 处理结果
+			result = append(result, response)
+		}
+		// 当 responseChannel被关闭时且channel中所有的值都已经被处理完毕后, 将执行到这一行
+		wgResponse.Done()
+	}()
+	region, _ := ip2region.New("./ip2region.db")
+	defer region.Close()
+	for _, url := range urls {
+		// 计数器+1
+		wg.Add(1)
+		limiter <- true
+		// 这里在启动goroutine时, 将用来收集结果的局部变量channel也传递进去
+		go QuerIP_go(url, responseChannel, limiter, wg, region)
+	}
+
+	// 等待所以协程执行完毕
+	wg.Wait() // 当计数器为0时, 不再阻塞
+	fmt.Println("所有协程已执行完毕")
+
+	// 关闭接收结果channel
+	close(responseChannel)
+
+	// 等待wgResponse的计数器归零
+	wgResponse.Wait()
+
+	// 返回聚合后结果
+	return result
+}
+
+func main() {
+	urls := []string{
+		"1.1.189.58",
+		"1.1.220.100", "1.1.240.157", "1.10.133.149", "1.10.140.43", "1.10.141.220", "1.10.187.140", "1.10.189.133", "1.10.189.156", "1.10.189.84", "1.117.231.98", "1.13.165.87", "1.14.104.55", "1.15.182.239", "1.174.166.180", "1.179.130.201", "1.179.136.98", "1.179.144.41", "1.179.145.101", "1.179.147.5", "1.179.148.9", "1.179.151.165", "1.179.172.45", "1.179.173.114", "1.179.180.98", "1.179.183.73", "1.179.186.68", "1.179.186.69", "1.179.186.70", "1.179.186.71", "1.179.198.226", "1.179.202.33", "1.180.0.162", "1.180.156.22"}
+
+	result := QuerIP(urls)
+	fmt.Println(result)
+}

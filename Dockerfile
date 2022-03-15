@@ -11,7 +11,7 @@ COPY . .
 
 #增加缺失的包，移除没用的包
 RUN go mod tidy
-RUN go build -o main .
+RUN go build -o main main.go
 # 下载最新的数据库
 RUN wget https://github.do/https://raw.githubusercontent.com/bqf9979/ip2region/master/data/ip2region.db
 

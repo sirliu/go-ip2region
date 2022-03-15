@@ -8,8 +8,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/lionsoul2014/ip2region/binding/golang/ip2region"
 	"github.com/thinkeridea/go-extend/exnet"
@@ -84,7 +86,6 @@ func QuerIP_go(ip string, response chan IpInfo, limiter chan bool, wg *sync.Wait
 	// time.Sleep(3 * time.Second)
 	// 函数执行完毕时 计数器-1
 	defer wg.Done()
-	// 将拿到的结果, 发送到参数中传递过来的channel中
 
 	info, _ := region.MemorySearch(ip)
 	rinfo := &IpInfo{
@@ -96,6 +97,7 @@ func QuerIP_go(ip string, response chan IpInfo, limiter chan bool, wg *sync.Wait
 		County:   "",
 		Region:   info.Region,
 	}
+	// 将拿到的结果, 发送到参数中传递过来的channel中
 	response <- *rinfo
 	// 释放一个坑位
 	<-limiter
@@ -107,6 +109,8 @@ func QuerIP(ips []string) []IpInfo {
 
 	wg := &sync.WaitGroup{}
 	// 控制并发数为10
+	cpus := runtime.NumCPU()
+	runtime.GOMAXPROCS(cpus)
 	limiter := make(chan bool, 34)
 	defer close(limiter)
 
@@ -138,7 +142,6 @@ func QuerIP(ips []string) []IpInfo {
 
 	// 等待所以协程执行完毕
 	wg.Wait() // 当计数器为0时, 不再阻塞
-	fmt.Println("所有协程已执行完毕")
 
 	// 关闭接收结果channel
 	close(responseChannel)
@@ -188,7 +191,13 @@ func queryIp(w http.ResponseWriter, r *http.Request) {
 	// 分割字符串
 
 	ip_arr := strings.Split(ip, ",")
+	// 启动时间
+	start := time.Now()
 	result := QuerIP(ip_arr)
+	// 结束时间
+	end := time.Now()
+	// 打印耗时
+	fmt.Printf("本次共处理 %d 个IP, 查询耗时(s): %f\n", len(ip_arr), end.Sub(start).Seconds())
 	msg, _ := json.Marshal(JsonRes{Code: 200, Data: result})
 	w.Write(msg)
 	return

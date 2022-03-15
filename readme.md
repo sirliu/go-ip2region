@@ -28,6 +28,10 @@ docker build -t go-ip2region:latest
 // 运行镜像
 docker run -itd --name=ipinfo -p 9090:9090 go-ip2region:latest
 ```
+一键实现
+```bash
+git clone https://github.com/hezhizheng/go-ip2region.git&&cd go-ip2region&&docker build -t go-ip2region:latest&&docker run -itd --name=ipinfo -p 9090:9090 go-ip2region:latest
+```
 
 ## 启动http服务
 ```

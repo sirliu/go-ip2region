@@ -3,20 +3,22 @@ package main
 import (
 	"encoding/json"
 	"flag"
-	"github.com/lionsoul2014/ip2region/binding/golang/ip2region"
-	"github.com/thinkeridea/go-extend/exnet"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
-	"sync"
 	"strings"
+	"sync"
+
+	"github.com/lionsoul2014/ip2region/binding/golang/ip2region"
+	"github.com/thinkeridea/go-extend/exnet"
 )
 
 var (
-	wg   = sync.WaitGroup{}
-	port = ""
-	d    = "" // 下载标识
+	wg    = sync.WaitGroup{}
+	port  = ""
+	d     = "" // 下载标识
 	dbUrl = map[string]string{
 		"1": "https://github.do/https://raw.githubusercontent.com/lionsoul2014/ip2region/raw/master/data/ip2region.db",
 		"2": "https://github.do/https://raw.githubusercontent.com/bqf9979/ip2region/raw/master/data/ip2region.db",
@@ -24,7 +26,7 @@ var (
 )
 
 const (
-	ipDbPath = "./ip2region.db"
+	ipDbPath     = "./ip2region.db"
 	defaultDbUrl = "2" // 默认下载 来自 bqf9979 仓库的 ip db文件,在维护，且有付费资源
 )
 
@@ -40,7 +42,7 @@ type IpInfo struct {
 	Province string `json:"province"` // 省
 	City     string `json:"city"`     // 市
 	County   string `json:"county"`   // 县、区
-	Region   string  `json:"region"`  // 区域位置
+	Region   string `json:"region"`   // 区域位置
 	ISP      string `json:"isp"`      // 互联网服务提供商
 }
 
@@ -55,7 +57,7 @@ func init() {
 	if d != "0" {
 		if value, ok := dbUrl[d]; ok {
 			downloadIpDb(value)
-		}else{
+		} else {
 			downloadIpDb(dbUrl[defaultDbUrl])
 		}
 		os.Exit(1)
@@ -76,6 +78,78 @@ func main() {
 	}
 }
 
+func QuerIP_go(ip string, response chan IpInfo, limiter chan bool, wg *sync.WaitGroup, region *ip2region.Ip2Region) {
+	// fmt.Println()
+	// fmt.Println("开始携程:\t", ip, time.Now(), "休眠3秒")
+	// time.Sleep(3 * time.Second)
+	// 函数执行完毕时 计数器-1
+	defer wg.Done()
+	// 将拿到的结果, 发送到参数中传递过来的channel中
+
+	info, _ := region.MemorySearch(ip)
+	rinfo := &IpInfo{
+		Ip:       ip,
+		ISP:      info.ISP,
+		Country:  info.Country,
+		Province: info.Province,
+		City:     info.City,
+		County:   "",
+		Region:   info.Region,
+	}
+	response <- *rinfo
+	// 释放一个坑位
+	<-limiter
+}
+
+// 将所有的返回结果, 以 []string 的形式返回
+func QuerIP(ips []string) []IpInfo {
+	var result []IpInfo
+
+	wg := &sync.WaitGroup{}
+	// 控制并发数为10
+	limiter := make(chan bool, 34)
+	defer close(limiter)
+
+	// 函数内的局部变量channel, 专门用来接收函数内所有goroutine的结果
+	responseChannel := make(chan IpInfo, 34)
+	// 为读取结果控制器创建新的WaitGroup, 需要保证控制器内的所有值都已经正确处理完毕, 才能结束
+	wgResponse := &sync.WaitGroup{}
+	// 启动读取结果的控制器
+	// wgResponse计数器+1
+	wgResponse.Add(1)
+	go func() {
+		// 读取结果
+		for response := range responseChannel {
+			// 处理结果
+			result = append(result, response)
+		}
+		// 当 responseChannel被关闭时且channel中所有的值都已经被处理完毕后, 将执行到这一行
+		wgResponse.Done()
+	}()
+	region, _ := ip2region.New("./ip2region.db")
+	defer region.Close()
+	for _, ip := range ips {
+		// 计数器+1
+		wg.Add(1)
+		limiter <- true
+		// 这里在启动goroutine时, 将用来收集结果的局部变量channel也传递进去
+		go QuerIP_go(ip, responseChannel, limiter, wg, region)
+	}
+
+	// 等待所以协程执行完毕
+	wg.Wait() // 当计数器为0时, 不再阻塞
+	fmt.Println("所有协程已执行完毕")
+
+	// 关闭接收结果channel
+	close(responseChannel)
+
+	// 等待wgResponse的计数器归零
+	wgResponse.Wait()
+
+	// 返回聚合后结果
+	return result
+}
+
 func queryIp(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("content-type", "text/json;charset=utf-8")
 
@@ -86,9 +160,9 @@ func queryIp(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	if  r.URL.Path != "/" {
+	if r.URL.Path != "/" {
 		w.WriteHeader(404)
-		msg, _ := json.Marshal(&JsonRes{Code: 4000, Msg: r.URL.Path+" 404 NOT FOUND !"})
+		msg, _ := json.Marshal(&JsonRes{Code: 4000, Msg: r.URL.Path + " 404 NOT FOUND !"})
 		w.Write(msg)
 		return
 	}
@@ -110,30 +184,11 @@ func queryIp(w http.ResponseWriter, r *http.Request) {
 		w.Write(msg)
 		return
 	}
-	
-	// 分割字符串
-	result := []IpInfo{}
-	ip_arr := strings.Split(ip,",")
-	for _,ip := range ip_arr{
-		info, searchErr := region.MemorySearch(ip)
-		if searchErr != nil {
-			msg, _ := json.Marshal(JsonRes{Code: 4002, Msg: searchErr.Error()})
-			w.Write(msg)
-			return
-		}
 
-		// 赋值查询结果
-		ipinfo := &IpInfo{
-                        Ip:       ip,
-                        ISP:      info.ISP,
-                        Country:  info.Country,
-                        Province: info.Province,
-                        City:     info.City,
-                        County:   "",
-                        Region:   info.Region,
-                } 
-		result = append(result,*ipinfo)
-	}
+	// 分割字符串
+
+	ip_arr := strings.Split(ip, ",")
+	result := QuerIP(ip_arr)
 	msg, _ := json.Marshal(JsonRes{Code: 200, Data: result})
 	w.Write(msg)
 	return
@@ -155,7 +210,7 @@ func checkIpDbIsExist() {
 }
 
 func downloadIpDb(url string) {
-	log.Println("正在下载最新的 ip 地址库...："+url)
+	log.Println("正在下载最新的 ip 地址库...：" + url)
 	wg.Add(1)
 	go func() {
 		downloadFile(ipDbPath, url)

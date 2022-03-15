@@ -2,4 +2,4 @@
 /tmp
 *.exe
 *.exe~
-ip2region.db
+# ip2region.db

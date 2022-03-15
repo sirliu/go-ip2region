@@ -1,0 +1,53 @@
+package ssmainss
+
+import (
+	"fmt"
+
+	"github.com/lionsoul2014/ip2region/binding/golang/ip2region"
+)
+
+type IpInfo struct {
+	Ip       string `json:"ip"`
+	Country  string `json:"country"`  // 国家
+	Province string `json:"province"` // 省
+	City     string `json:"city"`     // 市
+	County   string `json:"county"`   // 县、区
+	Region   string `json:"region"`   // 区域位置
+	ISP      string `json:"isp"`      // 互联网服务提供商
+}
+
+func main() {
+	ips := []string{"1.1.189.58", "1.1.220.100", "1.1.240.157", "1.10.133.149", "1.10.140.43", "1.10.141.220", "1.10.187.140", "1.10.189.133", "1.10.189.156", "1.10.189.84", "1.117.231.98", "1.13.165.87", "1.14.104.55", "1.15.182.239", "1.174.166.180", "1.179.130.201", "1.179.136.98", "1.179.144.41", "1.179.145.101", "1.179.147.5", "1.179.148.9", "1.179.151.165", "1.179.172.45", "1.179.173.114", "1.179.180.98", "1.179.183.73", "1.179.186.68", "1.179.186.69", "1.179.186.70", "1.179.186.71", "1.179.198.226", "1.179.202.33", "1.180.0.162", "1.180.156.22"}
+	queryIp(ips)
+
+}
+
+func queryIp(ips []string) {
+
+	region, _ := ip2region.New("./ip2region.db")
+	defer region.Close()
+
+	result := []IpInfo{}
+
+	for _, ip := range ips {
+		fmt.Println(ip)
+		info, _ := region.MemorySearch(ip)
+
+		// fmt.Println(info)
+		// 赋值查询结果
+		rinfo := &IpInfo{
+			Ip:       ip,
+			ISP:      info.ISP,
+			Country:  info.Country,
+			Province: info.Province,
+			City:     info.City,
+			County:   "",
+			Region:   info.Region,
+		}
+		result = append(result, *rinfo)
+	}
+
+	for _, v := range result {
+		fmt.Println(v)
+	}
+}
